@@ -80,11 +80,11 @@ void test_lfqueue(atomic_bool *table_test)
     args[0] = (void *)TYPE_LF_QUEUE;
     args[1] = queue;
     args[2] = table_test;
-    for (size_t i = 0; i < PRODUCER_THREAD_NUMBER; i++) {
-        p_pid_list[i] = start_thread(&fn, queue);
-    }
     for (size_t i = 0; i < CONSUMER_THREAD_NUMBER; i++) {
         c_pid_list[i] = start_thread(&poll_fn, args);
+    }
+    for (size_t i = 0; i < PRODUCER_THREAD_NUMBER; i++) {
+        p_pid_list[i] = start_thread(&fn, queue);
     }
 
     for (size_t i = 0; i < PRODUCER_THREAD_NUMBER; i++) {
@@ -106,15 +106,16 @@ void test_queue(atomic_bool *table_test)
     struct queue *queue;
     void **args = malloc(sizeof(void *) * 3);
     queue_init(&queue);
-    args[0] = (void *)TYPE_LF_QUEUE;
+    args[0] = (void *)TYPE_QUEUE;
     args[1] = queue;
     args[2] = table_test;
-    for (size_t i = 0; i < PRODUCER_THREAD_NUMBER; i++) {
-        pid_list[i] = start_thread(&fn, queue);
-    }
     for (size_t i = 0; i < CONSUMER_THREAD_NUMBER; i++) {
         c_pid_list[i] = start_thread(&poll_fn, args);
     }
+    for (size_t i = 0; i < PRODUCER_THREAD_NUMBER; i++) {
+        pid_list[i] = start_thread(&fn, queue);
+    }
+
     for (size_t i = 0; i < PRODUCER_THREAD_NUMBER; i++) {
         pthread_join(pid_list[i], NULL);
     }
