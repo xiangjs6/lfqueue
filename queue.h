@@ -7,6 +7,7 @@ struct queue;
 struct queue_ops {
     void (*fini)(struct queue *);
     int (*enqueue)(struct queue *, const void *data);
+    int (*dequeue)(struct queue *, void **data);
     void (*poll)(struct queue *, void (*)(void *, void *), void *carry);
 };
 

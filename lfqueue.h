@@ -5,6 +5,7 @@ struct lfqueue;
 struct lfqueue_ops {
     void (*fini)(struct lfqueue *);
     int (*enqueue)(struct lfqueue *, const void *data);
+    int (*dequeue)(struct lfqueue*, void **data);
     void (*poll)(struct lfqueue *, void (*)(void *, void *), void *carry);
 };
 

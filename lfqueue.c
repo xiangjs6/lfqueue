@@ -1,4 +1,5 @@
 #include <stdatomic.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <memory.h>
@@ -16,6 +17,28 @@ static int _lfqueue_enqueue(struct lfqueue *queue, const void *data)
     tail =
         (struct lfqueue_item *)atomic_exchange(&queue->tail, (uintptr_t)item);
     atomic_store(&tail->next, (uintptr_t)item);
+    return 0;
+}
+
+static int _lfqueue_dequeue(struct lfqueue *queue, void **data)
+{
+    struct lfqueue_item *it;
+    uintptr_t expected;
+    it = (struct lfqueue_item *)atomic_exchange(&queue->head.next,
+                                                (uintptr_t)&queue->head);
+    if (it == &queue->head) {
+        return -1;
+    }
+    expected = (uintptr_t)it;
+    if (atomic_compare_exchange_strong(&queue->tail, &expected,
+                                       (uintptr_t)&queue->head) == false) {
+        do {
+            expected = atomic_load(&it->next);
+        } while (expected == (uintptr_t)NULL);
+        atomic_store(&queue->head.next, expected);
+    }
+    *data = (void *)it->data;
+    free(it);
     return 0;
 }
 
@@ -55,6 +78,7 @@ static void _lfqueue_poll(struct lfqueue *queue, void (*fn)(void *, void *),
 
 static struct lfqueue_ops _lfqueue_ops = {.fini = &_lfqueue_fini,
                                           .enqueue = &_lfqueue_enqueue,
+                                          .dequeue = &_lfqueue_dequeue,
                                           .poll = &_lfqueue_poll};
 
 int lfqueue_init(struct lfqueue **queue)

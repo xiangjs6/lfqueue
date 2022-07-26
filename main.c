@@ -9,8 +9,8 @@
 #include "lfqueue.h"
 #include "queue.h"
 
-#define PRODUCER_THREAD_NUMBER 16
-#define CONSUMER_THREAD_NUMBER 4
+#define PRODUCER_THREAD_NUMBER 6
+#define CONSUMER_THREAD_NUMBER 2
 #define ADD_NUMBER (1024 * 1024)
 #define TOTAL_NUMBER ((unsigned long)ADD_NUMBER * PRODUCER_THREAD_NUMBER)
 
@@ -30,14 +30,26 @@ static pthread_t start_thread(int (*f)(void *), void *p)
 
 atomic_ullong acnt = 0;
 
-int fn(void *args)
+int enque_fn(void *args)
 {
-    struct lfqueue *queue = args;
-    for (int n = 0; n < ADD_NUMBER; ++n) {
-        long cnt = atomic_fetch_add(&acnt, 1);
-        if (queue->ops->enqueue(queue, (void *)cnt) != 0) {
-            printf("enqueue error\n");
-            return -1;
+    long type = (long)((void **)args)[0];
+    struct lfqueue *lf_queue = ((void **)args)[1];
+    struct queue *queue = ((void **)args)[1];
+    if (type == TYPE_QUEUE) {
+        for (int n = 0; n < ADD_NUMBER; ++n) {
+            long cnt = atomic_fetch_add(&acnt, 1);
+            if (queue->ops->enqueue(queue, (void *)cnt) != 0) {
+                printf("enqueue error\n");
+                return -1;
+            }
+        }
+    } else {
+        for (int n = 0; n < ADD_NUMBER; ++n) {
+            long cnt = atomic_fetch_add(&acnt, 1);
+            if (lf_queue->ops->enqueue(lf_queue, (void *)cnt) != 0) {
+                printf("enqueue error\n");
+                return -1;
+            }
         }
     }
     return 0;
@@ -50,6 +62,28 @@ void iter_fn(void *data, void *carry)
         printf("%ld dup\n", (long)data);
     }
     table_test[(long)data] = true;
+}
+
+int deque_fn(void *args)
+{
+    long type = (long)((void **)args)[0];
+    struct lfqueue *lf_queue = ((void **)args)[1];
+    struct queue *queue = ((void **)args)[1];
+    void *data;
+    if (type == TYPE_QUEUE) {
+        while (acnt != TOTAL_NUMBER) {
+            if (queue->ops->dequeue(queue, &data) == 0) {
+                iter_fn(data, ((void **)args)[2]);
+            }
+        }
+    } else {
+        while (acnt != TOTAL_NUMBER) {
+            if (lf_queue->ops->dequeue(lf_queue, &data) == 0) {
+                iter_fn(data, ((void **)args)[2]);
+            }
+        }
+    }
+    return 0;
 }
 
 int poll_fn(void *args)
@@ -81,10 +115,10 @@ void test_lfqueue(atomic_bool *table_test)
     args[1] = queue;
     args[2] = table_test;
     for (size_t i = 0; i < CONSUMER_THREAD_NUMBER; i++) {
-        c_pid_list[i] = start_thread(&poll_fn, args);
+        c_pid_list[i] = start_thread(&deque_fn, args);
     }
     for (size_t i = 0; i < PRODUCER_THREAD_NUMBER; i++) {
-        p_pid_list[i] = start_thread(&fn, queue);
+        p_pid_list[i] = start_thread(&enque_fn, args);
     }
 
     for (size_t i = 0; i < PRODUCER_THREAD_NUMBER; i++) {
@@ -101,7 +135,7 @@ void test_lfqueue(atomic_bool *table_test)
 void test_queue(atomic_bool *table_test)
 {
     acnt = 0;
-    pthread_t pid_list[PRODUCER_THREAD_NUMBER];
+    pthread_t p_pid_list[PRODUCER_THREAD_NUMBER];
     pthread_t c_pid_list[CONSUMER_THREAD_NUMBER];
     struct queue *queue;
     void **args = malloc(sizeof(void *) * 3);
@@ -110,17 +144,17 @@ void test_queue(atomic_bool *table_test)
     args[1] = queue;
     args[2] = table_test;
     for (size_t i = 0; i < CONSUMER_THREAD_NUMBER; i++) {
-        c_pid_list[i] = start_thread(&poll_fn, args);
+        c_pid_list[i] = start_thread(&deque_fn, args);
     }
     for (size_t i = 0; i < PRODUCER_THREAD_NUMBER; i++) {
-        pid_list[i] = start_thread(&fn, queue);
+        p_pid_list[i] = start_thread(&enque_fn, args);
     }
 
     for (size_t i = 0; i < PRODUCER_THREAD_NUMBER; i++) {
-        pthread_join(pid_list[i], NULL);
+        pthread_join(p_pid_list[i], NULL);
     }
     for (size_t i = 0; i < CONSUMER_THREAD_NUMBER; i++) {
-        c_pid_list[i] = start_thread(&poll_fn, args);
+        pthread_join(c_pid_list[i], NULL);
     }
     queue->ops->poll(queue, iter_fn, table_test);
     queue->ops->fini(queue);

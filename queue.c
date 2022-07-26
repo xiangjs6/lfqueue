@@ -25,6 +25,21 @@ static int _queue_enqueue(struct queue *queue, const void *data)
     return 0;
 }
 
+static int _queue_dequeue(struct queue *queue, void **data)
+{
+    struct queue_item *item;
+    LOCK(&queue->lck);
+    item = queue->head.next;
+    queue->head.next = item != queue->tail ? item->next : &queue->head;
+    queue->tail = item == queue->tail ? &queue->head : queue->tail;
+    UNLOCK(&queue->lck);
+    if (item == &queue->head) {
+        return -1;
+    }
+    *data = (void *)item->data;
+    return 0;
+}
+
 static void _queue_fini(struct queue *queue)
 {
     struct queue_item *it = queue->head.next, *next;
@@ -59,8 +74,10 @@ static void _queue_poll(struct queue *queue, void (*fn)(void *, void *),
     }
 }
 
-static struct queue_ops _queue_ops = {
-    .fini = _queue_fini, .enqueue = _queue_enqueue, .poll = _queue_poll};
+static struct queue_ops _queue_ops = {.fini = &_queue_fini,
+                                      .enqueue = &_queue_enqueue,
+                                      .dequeue = &_queue_dequeue,
+                                      .poll = &_queue_poll};
 
 int queue_init(struct queue **queue)
 {
