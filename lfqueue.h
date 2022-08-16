@@ -10,7 +10,6 @@ struct lfqueue_ops {
 };
 
 struct lfqueue_item {
-    const void *data;
     volatile atomic_uintptr_t next;
 };
 
@@ -18,6 +17,7 @@ struct lfqueue {
     struct lfqueue_ops *ops;
     struct lfqueue_item head;
     volatile atomic_uintptr_t tail;
+    size_t _off;
 };
-int lfqueue_init(struct lfqueue **queue);
+int lfqueue_init(struct lfqueue **queue, size_t off);
 #endif // LFQUEUE_H

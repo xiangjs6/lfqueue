@@ -8,11 +8,7 @@
 static int _lfqueue_enqueue(struct lfqueue *queue, const void *data)
 {
     struct lfqueue_item *tail;
-    struct lfqueue_item *item = malloc(sizeof(*item));
-    if (item == NULL) {
-        return -1;
-    }
-    item->data = data;
+    struct lfqueue_item *item = (void *)((char *)data + queue->_off);
     atomic_store(&item->next, (uintptr_t)NULL);
     tail =
         (struct lfqueue_item *)atomic_exchange(&queue->tail, (uintptr_t)item);
@@ -37,21 +33,11 @@ static int _lfqueue_dequeue(struct lfqueue *queue, void **data)
         } while (expected == (uintptr_t)NULL);
         atomic_store(&queue->head.next, expected);
     }
-    *data = (void *)it->data;
-    free(it);
+    *data = (void *)((char *)it - queue->_off);
     return 0;
 }
 
-static void _lfqueue_fini(struct lfqueue *queue)
-{
-    struct lfqueue_item *it = (void *)atomic_load(&queue->head.next), *next;
-    while (it && it->next != (uintptr_t)&queue->head) {
-        next = (void *)atomic_load(&it->next);
-        free(it);
-        it = next;
-    }
-    free(queue);
-}
+static void _lfqueue_fini(struct lfqueue *queue) { free(queue); }
 
 static void _lfqueue_poll(struct lfqueue *queue, void (*fn)(void *, void *),
                           void *carry)
@@ -70,8 +56,7 @@ static void _lfqueue_poll(struct lfqueue *queue, void (*fn)(void *, void *),
         do {
             next = (void *)atomic_load(&it->next);
         } while (next == NULL);
-        fn((void *)it->data, carry);
-        free(it);
+        fn((void *)((char *)it - queue->_off), carry);
         it = next;
     }
 }
@@ -81,7 +66,7 @@ static struct lfqueue_ops _lfqueue_ops = {.fini = &_lfqueue_fini,
                                           .dequeue = &_lfqueue_dequeue,
                                           .poll = &_lfqueue_poll};
 
-int lfqueue_init(struct lfqueue **queue)
+int lfqueue_init(struct lfqueue **queue, size_t off)
 {
     *queue = malloc(sizeof(**queue));
     if (*queue == NULL) {
@@ -89,6 +74,7 @@ int lfqueue_init(struct lfqueue **queue)
     }
     memset(*queue, 0, sizeof(**queue));
     atomic_store(&(*queue)->head.next, (uintptr_t) & (*queue)->head);
+    (*queue)->_off = off;
     (*queue)->tail = (uintptr_t) & (*queue)->head;
     (*queue)->ops = &_lfqueue_ops;
     return 0;
