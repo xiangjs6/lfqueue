@@ -61,10 +61,16 @@ static void _lfqueue_poll(struct lfqueue *queue, void (*fn)(void *, void *),
     }
 }
 
+static bool _lfqueue_empty(struct lfqueue *queue)
+{
+    return atomic_load(&queue->head.next) == (uintptr_t)&queue->head;
+}
+
 static struct lfqueue_ops _lfqueue_ops = {.fini = &_lfqueue_fini,
                                           .enqueue = &_lfqueue_enqueue,
                                           .dequeue = &_lfqueue_dequeue,
-                                          .poll = &_lfqueue_poll};
+                                          .poll = &_lfqueue_poll,
+                                          .empty = _lfqueue_empty};
 
 int lfqueue_init(struct lfqueue **queue, size_t off)
 {
