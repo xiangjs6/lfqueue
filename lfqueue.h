@@ -8,10 +8,12 @@ struct lfqueue_ops {
     int (*dequeue)(struct lfqueue *, void **data);
     void (*poll)(struct lfqueue *, void (*)(void *, void *), void *carry);
     bool (*empty)(struct lfqueue *);
+    bool (*inside)(struct lfqueue *, const void *data);
 };
 
 struct lfqueue_item {
     volatile atomic_uintptr_t next;
+    volatile atomic_bool is_using;
 };
 
 struct lfqueue {
