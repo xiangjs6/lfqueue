@@ -13,7 +13,7 @@ struct lfqueue_ops {
 
 struct lfqueue_item {
     volatile atomic_uintptr_t next;
-    volatile atomic_bool is_using;
+    volatile atomic_uintptr_t queue_id;
 };
 
 struct lfqueue {
