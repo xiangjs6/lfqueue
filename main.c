@@ -1,5 +1,6 @@
 #include <stdatomic.h>
 #include <pthread.h>
+#include <stdint.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdbool.h>
@@ -13,6 +14,7 @@
 #define CONSUMER_THREAD_NUMBER 2
 #define ADD_NUMBER (100 * 1024 * 1024)
 #define TOTAL_NUMBER ((unsigned long)ADD_NUMBER * PRODUCER_THREAD_NUMBER)
+#define KICK_BATCH 100
 
 static pthread_t start_thread(int (*f)(void *), void *p)
 {
@@ -47,6 +49,27 @@ int enque_fn(void *args)
     return 0;
 }
 
+int kick_fn(void *args)
+{
+    struct lfqueue *lf_queue = ((void **)args)[0];
+    // memory leak
+    struct queue_data *array = calloc(ADD_NUMBER, sizeof(*array));
+    for (long long n = 0; n < ADD_NUMBER; ++n) {
+        array[n].number = atomic_fetch_add(&acnt, 1);
+        if (n % KICK_BATCH != 0) {
+            LFQUEUE_KICK_PUSH(&array[n - 1].entry, &array[n].entry);
+        }
+        if ((n + 1) % KICK_BATCH == 0) {
+            lf_queue->ops->kick(lf_queue, &array[n - KICK_BATCH + 1].entry);
+        }
+    }
+    if (ADD_NUMBER % KICK_BATCH != 0) {
+        lf_queue->ops->kick(lf_queue,
+                            &array[ADD_NUMBER - ADD_NUMBER % KICK_BATCH].entry);
+    }
+    return 0;
+}
+
 void iter_fn(void *data, void *carry)
 {
     struct queue_data *d = data;
@@ -64,20 +87,6 @@ int deque_fn(void *args)
     void *data;
     while (acnt != TOTAL_NUMBER) {
         if (lf_queue->ops->dequeue(lf_queue, &data) == 0) {
-            iter_fn(data, ((void **)args)[1]);
-        }
-    }
-    return 0;
-}
-
-int fetch_fn(void *args)
-{
-    struct lfqueue *lf_queue = ((void **)args)[0];
-    struct lfqueue_item *item;
-    void *data;
-    while (acnt != TOTAL_NUMBER) {
-        item = lf_queue->ops->fetch(lf_queue);
-        while ((data = lf_queue->ops->next(lf_queue, &item)) != NULL) {
             iter_fn(data, ((void **)args)[1]);
         }
     }
@@ -104,10 +113,10 @@ void test_lfqueue(atomic_bool *table_test)
     args[0] = queue;
     args[1] = table_test;
     for (size_t i = 0; i < CONSUMER_THREAD_NUMBER; i++) {
-        c_pid_list[i] = start_thread(&fetch_fn, args);
+        c_pid_list[i] = start_thread(&poll_fn, args);
     }
     for (size_t i = 0; i < PRODUCER_THREAD_NUMBER; i++) {
-        p_pid_list[i] = start_thread(&enque_fn, args);
+        p_pid_list[i] = start_thread(&kick_fn, args);
     }
 
     for (size_t i = 0; i < PRODUCER_THREAD_NUMBER; i++) {

@@ -64,32 +64,16 @@ static void _lfqueue_poll(struct lfqueue *queue, void (*fn)(void *, void *),
     }
 }
 
-static struct lfqueue_item *_lfqueue_fetch(struct lfqueue *queue)
+static void _lfqueue_kick(struct lfqueue *queue, struct lfqueue_item *item)
 {
-    struct lfqueue_item *item, *tail;
-    item = (struct lfqueue_item *)atomic_exchange(&queue->head.next,
-                                                  (uintptr_t)&queue->head);
-    if (item == &queue->head) {
-        return &queue->head;
+    struct lfqueue_item *tail;
+    for (tail = item; tail->next != (uintptr_t)NULL;
+         tail = (struct lfqueue_item *)tail->next) {
+        atomic_store(&tail->queue_id, (uintptr_t)&queue->head);
     }
-    tail = (struct lfqueue_item *)atomic_exchange(&queue->tail,
-                                                  (uintptr_t)&queue->head);
-    atomic_store(&tail->next, (uintptr_t)&queue->head);
-    return item;
-}
-
-static void *_lfqueue_next(struct lfqueue *queue, struct lfqueue_item **p_it)
-{
-    struct lfqueue_item *item = *p_it, *next;
-    if (item == &queue->head) {
-        return NULL;
-    }
-    do {
-        next = (void *)atomic_load(&item->next);
-    } while (next == NULL);
-    atomic_store(&item->queue_id, (uintptr_t)NULL);
-    *p_it = next;
-    return (void *)((char *)item - queue->_off);
+    tail =
+        (struct lfqueue_item *)atomic_exchange(&queue->tail, (uintptr_t)tail);
+    atomic_store(&tail->next, (uintptr_t)item);
 }
 
 static bool _lfqueue_empty(struct lfqueue *queue)
@@ -107,8 +91,7 @@ static struct lfqueue_ops _lfqueue_ops = {.fini = &_lfqueue_fini,
                                           .enqueue = &_lfqueue_enqueue,
                                           .dequeue = &_lfqueue_dequeue,
                                           .poll = &_lfqueue_poll,
-                                          .fetch = &_lfqueue_fetch,
-                                          .next = &_lfqueue_next,
+                                          .kick = &_lfqueue_kick,
                                           .empty = &_lfqueue_empty,
                                           .inside = &_lfqueue_inside};
 
