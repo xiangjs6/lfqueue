@@ -7,7 +7,7 @@ struct lfqueue_ops {
     int (*enqueue)(struct lfqueue *, const void *data);
     int (*dequeue)(struct lfqueue *, void **data);
     void (*poll)(struct lfqueue *, void (*)(void *, void *), void *carry);
-    struct lfqueue_item *(*kick)(struct lfqueue *);
+    struct lfqueue_item *(*fetch)(struct lfqueue *);
     void *(*next)(struct lfqueue *, struct lfqueue_item **);
     bool (*empty)(struct lfqueue *);
     bool (*inside)(struct lfqueue *, const void *data);

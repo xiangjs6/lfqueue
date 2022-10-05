@@ -64,7 +64,7 @@ static void _lfqueue_poll(struct lfqueue *queue, void (*fn)(void *, void *),
     }
 }
 
-static struct lfqueue_item *_lfqueue_kick(struct lfqueue *queue)
+static struct lfqueue_item *_lfqueue_fetch(struct lfqueue *queue)
 {
     struct lfqueue_item *item, *tail;
     item = (struct lfqueue_item *)atomic_exchange(&queue->head.next,
@@ -107,7 +107,7 @@ static struct lfqueue_ops _lfqueue_ops = {.fini = &_lfqueue_fini,
                                           .enqueue = &_lfqueue_enqueue,
                                           .dequeue = &_lfqueue_dequeue,
                                           .poll = &_lfqueue_poll,
-                                          .kick = &_lfqueue_kick,
+                                          .fetch = &_lfqueue_fetch,
                                           .next = &_lfqueue_next,
                                           .empty = &_lfqueue_empty,
                                           .inside = &_lfqueue_inside};

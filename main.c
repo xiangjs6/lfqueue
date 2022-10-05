@@ -70,13 +70,13 @@ int deque_fn(void *args)
     return 0;
 }
 
-int kick_fn(void *args)
+int fetch_fn(void *args)
 {
     struct lfqueue *lf_queue = ((void **)args)[0];
     struct lfqueue_item *item;
     void *data;
     while (acnt != TOTAL_NUMBER) {
-        item = lf_queue->ops->kick(lf_queue);
+        item = lf_queue->ops->fetch(lf_queue);
         while ((data = lf_queue->ops->next(lf_queue, &item)) != NULL) {
             iter_fn(data, ((void **)args)[1]);
         }
@@ -104,7 +104,7 @@ void test_lfqueue(atomic_bool *table_test)
     args[0] = queue;
     args[1] = table_test;
     for (size_t i = 0; i < CONSUMER_THREAD_NUMBER; i++) {
-        c_pid_list[i] = start_thread(&kick_fn, args);
+        c_pid_list[i] = start_thread(&fetch_fn, args);
     }
     for (size_t i = 0; i < PRODUCER_THREAD_NUMBER; i++) {
         p_pid_list[i] = start_thread(&enque_fn, args);
