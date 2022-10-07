@@ -41,10 +41,7 @@ int enque_fn(void *args)
     struct queue_data *array = calloc(ADD_NUMBER, sizeof(*array));
     for (long long n = 0; n < ADD_NUMBER; ++n) {
         array[n].number = atomic_fetch_add(&acnt, 1);
-        if (lf_queue->ops->enqueue(lf_queue, &array[n]) != 0) {
-            printf("enqueue error\n");
-            return -1;
-        }
+        lf_queue->ops->enqueue(lf_queue, &array[n]);
     }
     return 0;
 }
@@ -52,20 +49,22 @@ int enque_fn(void *args)
 int kick_fn(void *args)
 {
     struct lfqueue *lf_queue = ((void **)args)[0];
+    struct lfqueue_item *tail;
     // memory leak
     struct queue_data *array = calloc(ADD_NUMBER, sizeof(*array));
     for (long long n = 0; n < ADD_NUMBER; ++n) {
         array[n].number = atomic_fetch_add(&acnt, 1);
-        if (n % KICK_BATCH != 0) {
-            LFQUEUE_KICK_PUSH(&array[n - 1].entry, &array[n].entry);
+        if (n % KICK_BATCH == 0) {
+            LFQUEUE_SUBQ_INIT(lf_queue, &array[n].entry, tail);
+        } else {
+            LFQUEUE_SUBQ_PUSH(tail, &array[n].entry);
         }
         if ((n + 1) % KICK_BATCH == 0) {
-            lf_queue->ops->kick(lf_queue, &array[n - KICK_BATCH + 1].entry);
+            lf_queue->ops->kick(lf_queue, tail);
         }
     }
     if (ADD_NUMBER % KICK_BATCH != 0) {
-        lf_queue->ops->kick(lf_queue,
-                            &array[ADD_NUMBER - ADD_NUMBER % KICK_BATCH].entry);
+        lf_queue->ops->kick(lf_queue, tail);
     }
     return 0;
 }
@@ -86,7 +85,23 @@ int deque_fn(void *args)
     struct lfqueue *lf_queue = ((void **)args)[0];
     void *data;
     while (acnt != TOTAL_NUMBER) {
-        if (lf_queue->ops->dequeue(lf_queue, &data) == 0) {
+        if ((data = lf_queue->ops->dequeue(lf_queue)) != NULL) {
+            iter_fn(data, ((void **)args)[1]);
+        }
+    }
+    return 0;
+}
+
+int fetch_fn(void *args)
+{
+    struct lfqueue *lf_queue = ((void **)args)[0];
+    struct lfqueue_item *tail, *value;
+    void *data;
+    while (acnt != TOTAL_NUMBER) {
+        tail = lf_queue->ops->fetch(lf_queue);
+        while (tail) {
+            LFQUEUE_SUBQ_POP(tail, value);
+            data = (char*)value - offsetof(struct queue_data, entry);
             iter_fn(data, ((void **)args)[1]);
         }
     }
@@ -113,7 +128,7 @@ void test_lfqueue(atomic_bool *table_test)
     args[0] = queue;
     args[1] = table_test;
     for (size_t i = 0; i < CONSUMER_THREAD_NUMBER; i++) {
-        c_pid_list[i] = start_thread(&poll_fn, args);
+        c_pid_list[i] = start_thread(&fetch_fn, args);
     }
     for (size_t i = 0; i < PRODUCER_THREAD_NUMBER; i++) {
         p_pid_list[i] = start_thread(&kick_fn, args);

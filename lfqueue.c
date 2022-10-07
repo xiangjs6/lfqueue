@@ -5,7 +5,7 @@
 #include <memory.h>
 
 #include "lfqueue.h"
-static int _lfqueue_enqueue(struct lfqueue *queue, const void *data)
+static void _lfqueue_enqueue(struct lfqueue *queue, const void *data)
 {
     struct lfqueue_item *tail;
     struct lfqueue_item *item = (void *)((char *)data + queue->_off);
@@ -14,17 +14,16 @@ static int _lfqueue_enqueue(struct lfqueue *queue, const void *data)
     tail =
         (struct lfqueue_item *)atomic_exchange(&queue->tail, (uintptr_t)item);
     atomic_store(&tail->next, (uintptr_t)item);
-    return 0;
 }
 
-static int _lfqueue_dequeue(struct lfqueue *queue, void **data)
+static void *_lfqueue_dequeue(struct lfqueue *queue)
 {
     struct lfqueue_item *item;
     uintptr_t expected;
     item = (struct lfqueue_item *)atomic_exchange(&queue->head.next,
                                                   (uintptr_t)&queue->head);
     if (item == &queue->head) {
-        return -1;
+        return NULL;
     }
     expected = (uintptr_t)item;
     if (atomic_compare_exchange_strong(&queue->tail, &expected,
@@ -35,8 +34,7 @@ static int _lfqueue_dequeue(struct lfqueue *queue, void **data)
         atomic_store(&queue->head.next, expected);
     }
     atomic_store(&item->queue_id, (uintptr_t)NULL);
-    *data = (void *)((char *)item - queue->_off);
-    return 0;
+    return (void *)((char *)item - queue->_off);
 }
 
 static void _lfqueue_fini(struct lfqueue *queue) { free(queue); }
@@ -64,16 +62,27 @@ static void _lfqueue_poll(struct lfqueue *queue, void (*fn)(void *, void *),
     }
 }
 
-static void _lfqueue_kick(struct lfqueue *queue, struct lfqueue_item *item)
+static void _lfqueue_kick(struct lfqueue *queue, struct lfqueue_item *tail)
 {
-    struct lfqueue_item *tail;
-    for (tail = item; tail->next != (uintptr_t)NULL;
-         tail = (struct lfqueue_item *)tail->next) {
-        atomic_store(&tail->queue_id, (uintptr_t)&queue->head);
-    }
+    struct lfqueue_item *head = (struct lfqueue_item *)tail->next;
+    atomic_store(&tail->next, (uintptr_t)NULL);
     tail =
         (struct lfqueue_item *)atomic_exchange(&queue->tail, (uintptr_t)tail);
-    atomic_store(&tail->next, (uintptr_t)item);
+    atomic_store(&tail->next, (uintptr_t)head);
+}
+
+static struct lfqueue_item *_lfqueue_fetch(struct lfqueue *queue)
+{
+    struct lfqueue_item *head, *tail;
+    head = (struct lfqueue_item *)atomic_exchange(&queue->head.next,
+                                                  (uintptr_t)&queue->head);
+    if (head == &queue->head) {
+        return NULL;
+    }
+    tail = (struct lfqueue_item *)atomic_exchange(&queue->tail,
+                                                  (uintptr_t)&queue->head);
+    atomic_store(&tail->next, (uintptr_t)head);
+    return tail;
 }
 
 static bool _lfqueue_empty(struct lfqueue *queue)
@@ -92,6 +101,7 @@ static struct lfqueue_ops _lfqueue_ops = {.fini = &_lfqueue_fini,
                                           .dequeue = &_lfqueue_dequeue,
                                           .poll = &_lfqueue_poll,
                                           .kick = &_lfqueue_kick,
+                                          .fetch = &_lfqueue_fetch,
                                           .empty = &_lfqueue_empty,
                                           .inside = &_lfqueue_inside};
 
