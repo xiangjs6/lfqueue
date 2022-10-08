@@ -14,7 +14,7 @@
 #define CONSUMER_THREAD_NUMBER 2
 #define ADD_NUMBER (100 * 1024 * 1024)
 #define TOTAL_NUMBER ((unsigned long)ADD_NUMBER * PRODUCER_THREAD_NUMBER)
-#define KICK_BATCH 100
+#define KICK_BATCH 1024
 
 static pthread_t start_thread(int (*f)(void *), void *p)
 {
@@ -38,11 +38,12 @@ int enque_fn(void *args)
 {
     struct lfqueue *lf_queue = ((void **)args)[0];
     // memory leak
-    struct queue_data *array = calloc(ADD_NUMBER, sizeof(*array));
+    struct queue_data *array = ((void **)args)[2];
     for (long long n = 0; n < ADD_NUMBER; ++n) {
         array[n].number = atomic_fetch_add(&acnt, 1);
         lf_queue->ops->enqueue(lf_queue, &array[n]);
     }
+    free(args);
     return 0;
 }
 
@@ -51,7 +52,7 @@ int kick_fn(void *args)
     struct lfqueue *lf_queue = ((void **)args)[0];
     struct lfqueue_item *tail;
     // memory leak
-    struct queue_data *array = calloc(ADD_NUMBER, sizeof(*array));
+    struct queue_data *array = ((void **)args)[2];
     for (long long n = 0; n < ADD_NUMBER; ++n) {
         array[n].number = atomic_fetch_add(&acnt, 1);
         if (n % KICK_BATCH == 0) {
@@ -66,6 +67,7 @@ int kick_fn(void *args)
     if (ADD_NUMBER % KICK_BATCH != 0) {
         lf_queue->ops->kick(lf_queue, tail);
     }
+    free(args);
     return 0;
 }
 
@@ -89,10 +91,11 @@ int deque_fn(void *args)
             iter_fn(data, ((void **)args)[1]);
         }
     }
+    free(args);
     return 0;
 }
 
-int fetch_fn(void *args)
+int fetch_pop_fn(void *args)
 {
     struct lfqueue *lf_queue = ((void **)args)[0];
     struct lfqueue_item *tail, *value;
@@ -101,10 +104,28 @@ int fetch_fn(void *args)
         tail = lf_queue->ops->fetch(lf_queue);
         while (tail) {
             LFQUEUE_SUBQ_POP(tail, value);
-            data = (char*)value - offsetof(struct queue_data, entry);
+            data = (char *)value - offsetof(struct queue_data, entry);
             iter_fn(data, ((void **)args)[1]);
         }
     }
+    free(args);
+    return 0;
+}
+
+int fetch_iter_fn(void *args)
+{
+    struct lfqueue *lf_queue = ((void **)args)[0];
+    struct lfqueue_item *tail, *value;
+    void *data;
+    while (acnt != TOTAL_NUMBER) {
+        tail = lf_queue->ops->fetch(lf_queue);
+        LFQUEUE_SUBQ_FOR_EACH(tail, it)
+        {
+            data = (char *)it - offsetof(struct queue_data, entry);
+            iter_fn(data, ((void **)args)[1]);
+        }
+    }
+    free(args);
     return 0;
 }
 
@@ -114,23 +135,29 @@ int poll_fn(void *args)
     while (acnt != TOTAL_NUMBER) {
         lf_queue->ops->poll(lf_queue, &iter_fn, ((void **)args)[1]);
     }
+    free(args);
     return 0;
 }
 
-void test_lfqueue(atomic_bool *table_test)
+void test_lfqueue(atomic_bool *table_test, struct queue_data *array)
 {
     acnt = 0;
     pthread_t p_pid_list[PRODUCER_THREAD_NUMBER];
     pthread_t c_pid_list[CONSUMER_THREAD_NUMBER];
     struct lfqueue *queue;
-    void **args = malloc(sizeof(void *) * 2);
+    void **args;
     lfqueue_init(&queue, offsetof(struct queue_data, entry));
-    args[0] = queue;
-    args[1] = table_test;
     for (size_t i = 0; i < CONSUMER_THREAD_NUMBER; i++) {
-        c_pid_list[i] = start_thread(&fetch_fn, args);
+        args = malloc(sizeof(*args) * 2);
+        args[0] = queue;
+        args[1] = table_test;
+        c_pid_list[i] = start_thread(&poll_fn, args);
     }
     for (size_t i = 0; i < PRODUCER_THREAD_NUMBER; i++) {
+        args = malloc(sizeof(*args) * 2);
+        args[0] = queue;
+        args[1] = table_test;
+        args[2] = &array[i * ADD_NUMBER];
         p_pid_list[i] = start_thread(&kick_fn, args);
     }
 
@@ -142,7 +169,6 @@ void test_lfqueue(atomic_bool *table_test)
     }
     queue->ops->poll(queue, iter_fn, table_test);
     queue->ops->fini(queue);
-    free(args);
 }
 
 double timeval_diff(struct timeval *tv0, struct timeval *tv1)
@@ -162,18 +188,22 @@ int main(void)
 {
     struct timeval start_tv, stop_tv;
     atomic_bool *table_test = malloc(TOTAL_NUMBER * sizeof(*table_test));
+    struct queue_data *array = malloc(TOTAL_NUMBER * sizeof(*array));
     printf("Number of producer threads: %d\n", PRODUCER_THREAD_NUMBER);
     printf("Number of consumer threads: %d\n", CONSUMER_THREAD_NUMBER);
 
     memset(table_test, 0, TOTAL_NUMBER * sizeof(*table_test));
+    memset(array, 0, TOTAL_NUMBER * sizeof(*array));
     gettimeofday(&start_tv, 0);
-    test_lfqueue(table_test);
+    test_lfqueue(table_test, array);
     gettimeofday(&stop_tv, 0);
     for (size_t i = 0; i < TOTAL_NUMBER; i++) {
         if (table_test[i] == false) {
             printf("%lu error no atomic\n", i);
         }
     }
+    free(table_test);
+    free(array);
     printf("lock free queue cost time %lfs ops: %lf/s\n",
            timeval_diff(&stop_tv, &start_tv),
            (double)TOTAL_NUMBER / timeval_diff(&stop_tv, &start_tv));
