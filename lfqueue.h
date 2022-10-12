@@ -59,11 +59,13 @@ int lfqueue_init(struct lfqueue **queue, size_t off);
     } while (0)
 
 #define LFQUEUE_SUBQ_FOR_EACH(t, iter)                                         \
-    for (struct lfqueue_item *iter = (t) ? (struct lfqueue_item *)(t)->next    \
-                                         : NULL,                               \
-                             *_LF_COMBINE(_prev, __LINE__) = NULL;             \
-         (t) != NULL && (iter != (struct lfqueue_item *)(t)->next ||           \
-                         _LF_COMBINE(_prev, __LINE__) == NULL);                \
+    for (const struct lfqueue_item *                                           \
+             iter = (t) ? (struct lfqueue_item *)(t)->next : NULL,             \
+            *_LF_COMBINE(_prev, __LINE__) = (void *)(intptr_t) !(t),           \
+            *const _LF_COMBINE(_end, __LINE__) =                               \
+                (t) ? (struct lfqueue_item *)(t)->next : NULL;                 \
+         iter != _LF_COMBINE(_end, __LINE__) ||                                \
+         _LF_COMBINE(_prev, __LINE__) == NULL;                                 \
          iter = (struct lfqueue_item *)iter->next)                             \
         if (iter == NULL || (_LF_COMBINE(_prev, __LINE__) = iter, false)) {    \
             iter = _LF_COMBINE(_prev, __LINE__);                               \

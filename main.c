@@ -14,7 +14,7 @@
 #define CONSUMER_THREAD_NUMBER 2
 #define ADD_NUMBER (100 * 1024 * 1024)
 #define TOTAL_NUMBER ((unsigned long)ADD_NUMBER * PRODUCER_THREAD_NUMBER)
-#define KICK_BATCH 1024
+#define KICK_BATCH 100
 
 static pthread_t start_thread(int (*f)(void *), void *p)
 {
