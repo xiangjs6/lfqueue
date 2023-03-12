@@ -16,7 +16,7 @@
 #define TOTAL_NUMBER ((unsigned long)ADD_NUMBER * PRODUCER_THREAD_NUMBER)
 #define KICK_BATCH 100
 
-static pthread_t start_thread(int (*f)(void *), void *p)
+static pthread_t start_thread(void *(*f)(void *), void *p)
 {
     pthread_t thread_id = (pthread_t)0;
     /*pthread_attr_t attr;*/
@@ -28,13 +28,13 @@ static pthread_t start_thread(int (*f)(void *), void *p)
 }
 
 struct queue_data {
-    struct lfqueue_item entry;
+    struct lfqueue_link_entry entry;
     unsigned long long number;
 };
 
 atomic_ullong acnt = 0;
 
-int enque_fn(void *args)
+void *enque_fn(void *args)
 {
     struct lfqueue *lf_queue = ((void **)args)[0];
     // memory leak
@@ -47,10 +47,10 @@ int enque_fn(void *args)
     return 0;
 }
 
-int kick_fn(void *args)
+void *kick_fn(void *args)
 {
     struct lfqueue *lf_queue = ((void **)args)[0];
-    struct lfqueue_item *tail;
+    struct lfqueue_link_entry *tail = NULL;
     // memory leak
     struct queue_data *array = ((void **)args)[2];
     for (long long n = 0; n < ADD_NUMBER; ++n) {
@@ -82,7 +82,7 @@ void iter_fn(void *data, void *carry)
     atomic_store(&table_test[d->number], true);
 }
 
-int deque_fn(void *args)
+void *deque_fn(void *args)
 {
     struct lfqueue *lf_queue = ((void **)args)[0];
     void *data;
@@ -95,10 +95,10 @@ int deque_fn(void *args)
     return 0;
 }
 
-int fetch_pop_fn(void *args)
+void *fetch_pop_fn(void *args)
 {
     struct lfqueue *lf_queue = ((void **)args)[0];
-    struct lfqueue_item *tail, *value;
+    struct lfqueue_link_entry *tail, *value;
     void *data;
     while (acnt != TOTAL_NUMBER) {
         tail = lf_queue->ops->fetch(lf_queue);
@@ -112,24 +112,7 @@ int fetch_pop_fn(void *args)
     return 0;
 }
 
-int fetch_iter_fn(void *args)
-{
-    struct lfqueue *lf_queue = ((void **)args)[0];
-    struct lfqueue_item *tail, *value;
-    void *data;
-    while (acnt != TOTAL_NUMBER) {
-        tail = lf_queue->ops->fetch(lf_queue);
-        LFQUEUE_SUBQ_FOR_EACH(tail, it)
-        {
-            data = (char *)it - offsetof(struct queue_data, entry);
-            iter_fn(data, ((void **)args)[1]);
-        }
-    }
-    free(args);
-    return 0;
-}
-
-int poll_fn(void *args)
+void *poll_fn(void *args)
 {
     struct lfqueue *lf_queue = ((void **)args)[0];
     while (acnt != TOTAL_NUMBER) {
@@ -146,19 +129,19 @@ void test_lfqueue(atomic_bool *table_test, struct queue_data *array)
     pthread_t c_pid_list[CONSUMER_THREAD_NUMBER];
     struct lfqueue *queue;
     void **args;
-    lfqueue_init(&queue, offsetof(struct queue_data, entry));
+    queue = lfqueue(LF_METHOD_LINK, offsetof(struct queue_data, entry));
     for (size_t i = 0; i < CONSUMER_THREAD_NUMBER; i++) {
         args = malloc(sizeof(*args) * 2);
         args[0] = queue;
         args[1] = table_test;
-        c_pid_list[i] = start_thread(&poll_fn, args);
+        c_pid_list[i] = start_thread(&deque_fn, args);
     }
     for (size_t i = 0; i < PRODUCER_THREAD_NUMBER; i++) {
-        args = malloc(sizeof(*args) * 2);
+        args = malloc(sizeof(*args) * 3);
         args[0] = queue;
         args[1] = table_test;
         args[2] = &array[i * ADD_NUMBER];
-        p_pid_list[i] = start_thread(&kick_fn, args);
+        p_pid_list[i] = start_thread(&enque_fn, args);
     }
 
     for (size_t i = 0; i < PRODUCER_THREAD_NUMBER; i++) {
@@ -187,10 +170,19 @@ double timeval_diff(struct timeval *tv0, struct timeval *tv1)
 int main(void)
 {
     struct timeval start_tv, stop_tv;
-    atomic_bool *table_test = malloc(TOTAL_NUMBER * sizeof(*table_test));
-    struct queue_data *array = malloc(TOTAL_NUMBER * sizeof(*array));
+    atomic_bool *table_test;
+    struct queue_data *array;
     printf("Number of producer threads: %d\n", PRODUCER_THREAD_NUMBER);
     printf("Number of consumer threads: %d\n", CONSUMER_THREAD_NUMBER);
+    table_test = malloc(TOTAL_NUMBER * sizeof(*table_test));
+    if (table_test == NULL) {
+        return -1;
+    }
+    array = malloc(TOTAL_NUMBER * sizeof(*array));
+    if (array == NULL) {
+        free(table_test);
+        return -1;
+    }
 
     memset(table_test, 0, TOTAL_NUMBER * sizeof(*table_test));
     memset(array, 0, TOTAL_NUMBER * sizeof(*array));

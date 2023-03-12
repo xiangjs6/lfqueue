@@ -1,0 +1,6 @@
+DEBUG        = 0
+ENABLE_SA    = 0
+ENABLE_UBSAN = 0
+ENABLE_ASAN  = 0
+ENABLE_TSAN  = 0
+INSTALL_PATH = /opt/share
