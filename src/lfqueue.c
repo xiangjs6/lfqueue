@@ -72,8 +72,7 @@ static void _lfqueue_poll(struct lfqueue *queue, void (*fn)(void *, void *),
     }
 }
 
-static void _lfqueue_kick(struct lfqueue *queue,
-                          struct lfqueue_entry *node)
+static void _lfqueue_kick(struct lfqueue *queue, struct lfqueue_entry *node)
 {
     atomic_uintptr_t *tail;
     struct lfqueue_entry *head = (struct lfqueue_entry *)node->next;
@@ -99,15 +98,25 @@ static struct lfqueue_entry *_lfqueue_fetch(struct lfqueue *queue)
     tail = (uintptr_t *)atomic_exchange(&queue->link[cur].tail,
                                         (uintptr_t)&queue->link[cur].head);
     *tail = (uintptr_t)head;
-    return (
-        struct lfqueue_entry *)((char *)tail -
-                                     offsetof(struct lfqueue_entry, next));
+    return (struct lfqueue_entry *)((char *)tail -
+                                    offsetof(struct lfqueue_entry, next));
 }
 
 static bool _lfqueue_inside(struct lfqueue *queue, const void *data)
 {
     struct lfqueue_entry *item = (void *)((char *)data + queue->off);
     return atomic_load(&item->queue_id) == (uintptr_t)queue;
+}
+
+static bool _lfqueue_empty(struct lfqueue *queue)
+{
+    for (size_t i = 0; i < queue->link_count; i++) {
+        if (atomic_load(&queue->link[i].head) !=
+            (uintptr_t)&queue->link[i].head) {
+            return false;
+        }
+    }
+    return true;
 }
 
 static void _lfqueue_fini(struct lfqueue *queue) { free(queue); }
@@ -118,7 +127,8 @@ static struct lfqueue_ops _lfqueue_link_ops = {.fini = &_lfqueue_fini,
                                                .poll = &_lfqueue_poll,
                                                .kick = &_lfqueue_kick,
                                                .fetch = &_lfqueue_fetch,
-                                               .inside = &_lfqueue_inside};
+                                               .inside = &_lfqueue_inside,
+                                               .empty = &_lfqueue_empty};
 
 struct lfqueue *lfqueue(int concurrent, size_t off)
 {

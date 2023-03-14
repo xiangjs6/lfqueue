@@ -19,6 +19,7 @@ struct lfqueue {
         void (*kick)(struct lfqueue *, struct lfqueue_entry *);
         struct lfqueue_entry *(*fetch)(struct lfqueue *);
         bool (*inside)(struct lfqueue *, const void *data);
+        bool (*empty)(struct lfqueue *);
     } *ops;
 #ifdef _LFQUEUE_SOURCE
     size_t off;
